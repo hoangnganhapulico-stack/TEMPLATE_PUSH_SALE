@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="vi">
 <head>
@@ -273,12 +272,7 @@ body{background-color:#f8fafc;color:#0f172a}
     <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 mb-5">
       <div>
         <span class="bg-indigo-100 text-indigo-800 text-[10px] font-black px-2.5 py-1 rounded-full uppercase">🏆 LEADERBOARD</span>
-        <h3 class="text-xl font-black text-slate-900 mt-1">Bảng Xếp Hạng Doanh Thu &amp; Số Lượng Nhân Viên</h3>
-        <span id="leaderboardScopeLabel" class="text-xs font-semibold text-slate-500"></span>
-      </div>
-      <div class="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
-        <label class="text-[11px] font-black text-slate-600 uppercase whitespace-nowrap">📅 Xem theo:</label>
-        <select id="leaderboardDaySelect" onchange="handleLeaderboardDayChange(this.value)" class="bg-white border border-slate-300 font-bold text-xs rounded-lg px-2.5 py-1.5"></select>
+        <h3 class="text-xl font-black text-slate-900 mt-1">Bảng Xếp Hạng Doanh Thu & Số Lượng</h3>
       </div>
     </div>
     <div class="overflow-x-auto table-scroll" id="leaderboardTable"></div>
@@ -666,8 +660,6 @@ async function parseConfigExcel(file) {
         // Auto-detect name column position
         const nameCol4 = hRow4.findIndex(c => c && String(c).includes('Tên nhân viên'));
         const nc = nameCol4 >= 0 ? nameCol4 : 1; // default col B
-        // Optional "Chức danh" (job title) column — not required by the template
-        const roleCol4 = hRow4.findIndex(c => c && /chức\s*danh|chuc\s*danh|vị\s*trí|vi\s*tri|position|role/i.test(String(c)));
         // Find group target columns. Match is tolerant of accent/substring differences
         // between the group name (sheet NHÓM SẢN PHẨM) and the column header (sheet NHÂN VIÊN),
         // e.g. group "Xịt chống muỗi" vs column header "Chống muỗi" — an exact-string match would
@@ -700,7 +692,6 @@ async function parseConfigExcel(file) {
           cfg.staff.push({
             id: 'S' + i,
             name: nameStr,
-            role: roleCol4 >= 0 ? String(r[roleCol4]||'').trim() : '',
             keywords,
             targets,
             color: AVATAR_COLORS[(cfg.staff.length) % AVATAR_COLORS.length]
@@ -740,7 +731,6 @@ function initAppState(cfg) {
   appState = {
     currentGroup: 'ALL',
     tableFilter: 'ALL',
-    leaderboardDayFilter: 'ALL',
     selectedStaffId: cfg.staff[0]?.id || null,
     totalStoreRevenue: 0,
     staffList,
@@ -900,13 +890,6 @@ function activateDashboard() {
   const grpSelect = document.getElementById('groupFilterSelect');
   grpSelect.innerHTML = `<option value="ALL">🔥 Tất Cả Sản Phẩm Sale</option>` +
     config.groups.map(g => `<option value="${g.id}">${g.emoji} ${g.name} (${fmt(g.target)})</option>`).join('');
-
-  // Build leaderboard "Xem theo" day dropdown
-  const ldSelect = document.getElementById('leaderboardDaySelect');
-  const periodLabel = `${config.startDate.toLocaleDateString('vi-VN')} - ${config.endDate.toLocaleDateString('vi-VN')}`;
-  ldSelect.innerHTML = `<option value="ALL">📊 Tổng Toàn Kỳ (${periodLabel})</option>` +
-    appState.days.map(d => `<option value="${d.dayNum}">${d.dd}/${d.mm} (${d.dayName}${d.isWeekend?' 🏖️':''})</option>`).join('');
-  updateLeaderboardScopeLabel();
   // Build barcode modal content
   document.getElementById('barcodeModalContent').innerHTML = config.groups.map(g => `
     <div class="mb-4">
@@ -939,24 +922,6 @@ function setGroupFilter(gid) {
   renderKPI(); renderDailyTable(); renderIndividual(); renderLeaderboard(); renderCharts();
 }
 
-function handleLeaderboardDayChange(val) {
-  if (!appState) return;
-  appState.leaderboardDayFilter = val === 'ALL' ? 'ALL' : parseInt(val);
-  updateLeaderboardScopeLabel();
-  renderLeaderboard();
-}
-
-function updateLeaderboardScopeLabel() {
-  const label = document.getElementById('leaderboardScopeLabel');
-  if (!label || !appState) return;
-  const periodLabel = `${config.startDate.toLocaleDateString('vi-VN')} - ${config.endDate.toLocaleDateString('vi-VN')}`;
-  if (appState.leaderboardDayFilter === 'ALL') {
-    label.textContent = `Xếp theo doanh thu · Toàn kỳ ${periodLabel}`;
-  } else {
-    const d = appState.days.find(x => x.dayNum === appState.leaderboardDayFilter);
-    label.textContent = `Xếp theo doanh thu · Ngày ${d ? d.dd+'/'+d.mm : ''} (${d ? d.dayName : ''})`;
-  }
-}
 function setTableFilter(f) {
   if (!appState) return;
   appState.tableFilter = f;
@@ -985,12 +950,27 @@ function renderAll() {
 
 function updateLowStockBanner() {
   if (!appState) return;
-  const low = config.groups.filter(g => (appState.inventory[g.id]?.closeQty ?? 0) < 20);
   const banner = document.getElementById('lowStockBanner');
+  if (!banner) return;
+  // Luôn tính lại tồn hiện tại từ dữ liệu gốc (không dùng closeQty đã lưu có thể bị cũ)
+  const stock = {};
+  config.groups.forEach(g => { stock[g.id] = computeClosingStock(g); });
+  const low = config.groups.filter(g => stock[g.id] !== null && stock[g.id] < 20);
   if (!low.length) { banner.classList.add('hidden'); return; }
   banner.classList.remove('hidden');
   document.getElementById('lowStockBannerText').textContent =
-    low.map(g => `${g.emoji} ${g.name}: còn ${fmt(appState.inventory[g.id].closeQty)} sản phẩm`).join(' · ');
+    low.map(g => `${g.emoji} ${g.name}: còn ${fmt(Math.max(0, stock[g.id]))} sản phẩm`).join(' · ');
+}
+
+function computeClosingStock(g) {
+  const inv = appState.inventory[g.id];
+  if (!inv) return null;
+  const salesQty = appState.days.reduce((s,d)=>s+(d.groupActual[g.id]||0),0);
+  const restockTotal = (inv.restocks||[]).reduce((s,r)=>s+(Number(r.qty)||0),0);
+  const closing = (Number(inv.openingStock)||0) + restockTotal - salesQty;
+  inv.salesQty = salesQty;
+  inv.closeQty = Math.max(0, closing);
+  return closing;
 }
 
 // ================================================================
@@ -1079,6 +1059,7 @@ function renderInventory() {
     appState.inventory[g.id].salesQty = appState.days.reduce((s,d)=>s+(d.groupActual[g.id]||0),0);
   });
   document.getElementById('inventorySection').innerHTML = config.groups.map(g => renderInventoryCard(g)).join('');
+  updateLowStockBanner();
 }
 
 function renderInventoryCard(g) {
@@ -1367,30 +1348,17 @@ function renderLeaderboard() {
   if (!appState) return;
   const grps = appState.currentGroup==='ALL' ? config.groups : config.groups.filter(g=>g.id===appState.currentGroup);
   const bs = appState.billStats;
-  const dayFilter = appState.leaderboardDayFilter; // 'ALL' or 1-based dayNum
-  const dayIdx = dayFilter==='ALL' ? null : dayFilter-1; // 0-based, matches billStats/day array index
-  const totalWeight = appState.days.reduce((s,d)=>s+d.weight,0);
-  const selectedDay = dayFilter==='ALL' ? null : appState.days[dayIdx];
-
   const ranked = [...appState.staffList].map(s => {
-    let total, totalRev, totalTarget, totalBills, pushBills;
-    if (dayFilter==='ALL') {
-      total = grps.reduce((ss,g)=>ss+(s.actualQty[g.id]||0),0);
-      totalRev = grps.reduce((ss,g)=>ss+(s.actualRev[g.id]||0),0);
-      totalTarget = grps.reduce((ss,g)=>ss+(s.targets[g.id]||0),0);
-      totalBills = Object.values(bs.totalBills[s.id]||{}).reduce((sum,dayMap)=>sum+Object.keys(dayMap).length,0);
-      pushBills = 0;
-      grps.forEach(g => { pushBills += Object.values((bs.pushBills[g.id]||{})[s.id]||{}).reduce((sum,dm)=>sum+Object.keys(dm).length,0); });
-    } else {
-      const sd = selectedDay ? selectedDay.staffDaily[s.id] : null;
-      total = sd ? grps.reduce((ss,g)=>ss+(sd.qty[g.id]||0),0) : 0;
-      totalRev = sd ? grps.reduce((ss,g)=>ss+(sd.rev[g.id]||0),0) : 0;
-      totalTarget = selectedDay ? Math.round(grps.reduce((ss,g)=>ss+groupCampaignTarget(g),0) * selectedDay.weight / totalWeight) : 0;
-      totalBills = Object.keys((bs.totalBills[s.id]||{})[dayIdx]||{}).length;
-      pushBills = 0;
-      grps.forEach(g => { pushBills += Object.keys(((bs.pushBills[g.id]||{})[s.id]||{})[dayIdx]||{}).length; });
-    }
-    return { ...s, total, totalRev, totalTarget, totalBills, pushBills, convRate: totalBills ? pct(pushBills,totalBills) : 0 };
+    const totalBills = Object.values(bs.totalBills[s.id]||{}).reduce((sum,dayMap)=>sum+Object.keys(dayMap).length,0);
+    let pushBills = 0;
+    grps.forEach(g => { pushBills += Object.values((bs.pushBills[g.id]||{})[s.id]||{}).reduce((sum,dm)=>sum+Object.keys(dm).length,0); });
+    return {
+      ...s,
+      total: grps.reduce((ss,g)=>ss+(s.actualQty[g.id]||0),0),
+      totalRev: grps.reduce((ss,g)=>ss+(s.actualRev[g.id]||0),0),
+      totalTarget: grps.reduce((ss,g)=>ss+(s.targets[g.id]||0),0),
+      convRate: totalBills ? pct(pushBills,totalBills) : 0
+    };
   }).sort((a,b)=>b.totalRev-a.totalRev);
 
   // Podium (top 3), vertical ranked list style
@@ -1403,7 +1371,6 @@ function renderLeaderboard() {
       <div class="avatar-circle" style="background:${s.color}">${initials(s.name)}</div>
       <div class="flex-1 min-w-0">
         <div class="text-xs font-bold text-slate-800 truncate">${s.name}</div>
-        ${s.role?`<div class="text-[10px] text-slate-400 truncate">${s.role}</div>`:''}
         <div class="text-[11px] text-slate-500">${fmt(s.total)} sp · ${fmtVND(s.totalRev)}</div>
       </div>
     </div>`).join('') || '<p class="text-xs text-slate-400">Chưa có dữ liệu</p>';
@@ -1419,7 +1386,6 @@ function renderLeaderboard() {
           <span class="font-semibold text-sm">${s.name}</span>
         </div>
       </td>
-      <td class="p-3 text-center text-xs text-slate-500">${s.role || '—'}</td>
       <td class="p-3 text-center bg-orange-50/60 text-orange-900 font-bold">${fmt(s.total)}</td>
       <td class="p-3 text-center bg-emerald-50/60 text-emerald-900 font-semibold text-xs">${fmtVND(s.totalRev)}</td>
       <td class="p-3 text-center">${statusBadge(s.total,s.totalTarget)}</td>
@@ -1433,7 +1399,6 @@ function renderLeaderboard() {
         <tr class="bg-slate-100 text-slate-700 text-xs font-extrabold uppercase tracking-wider border-b border-slate-200">
           <th class="p-3">Hạng</th>
           <th class="p-3">Nhân Viên</th>
-          <th class="p-3 text-center">Chức Danh</th>
           <th class="p-3 text-center bg-orange-50 text-orange-900">Đã Bán</th>
           <th class="p-3 text-center bg-emerald-50 text-emerald-900">Doanh Thu</th>
           <th class="p-3 text-center">Tiến Độ (%)</th>
@@ -1901,7 +1866,7 @@ async function handlePLUImport() {
       const inc = incomeByGroup[g.id];
       if (inc>0) appState.inventory[g.id].restocks.push({qty:inc, date:importDate+' (từ PLU)'});
     });
-    saveState(); closeModal('pluModal'); renderInventory();
+    renderInventory(); saveState(); closeModal('pluModal');
     const incomeGroups = config.groups.filter(g=>incomeByGroup[g.id]>0).length;
     const incomeMsg = incomeGroups>0 ? ` + ${incomeGroups} nhóm có nhập hàng` : '';
     showToast(`✅ Đã nhập tồn kho: ${matched} barcode khớp${incomeMsg}`,'success');
