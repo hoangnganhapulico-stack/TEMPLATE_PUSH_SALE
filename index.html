@@ -746,6 +746,7 @@ function initAppState(cfg) {
     currentGroup: 'ALL',
     tableFilter: 'ALL',
     leaderboardDayFilter: 'ALL',
+    leaderboardSort: { field: 'totalRev', dir: 'desc' },
     selectedStaffId: cfg.staff[0]?.id || null,
     totalStoreRevenue: 0,
     staffList,
@@ -1368,6 +1369,17 @@ function updateStoreRevenue(val) {
 // ================================================================
 // LEADERBOARD
 // ================================================================
+function setLeaderboardSort(field) {
+  if (!appState) return;
+  const cur = appState.leaderboardSort;
+  if (cur.field === field) {
+    cur.dir = cur.dir === 'desc' ? 'asc' : 'desc';
+  } else {
+    appState.leaderboardSort = { field, dir: field==='name' || field==='role' ? 'asc' : 'desc' };
+  }
+  renderLeaderboard();
+}
+
 function renderLeaderboard() {
   if (!appState) return;
   const grps = appState.currentGroup==='ALL' ? config.groups : config.groups.filter(g=>g.id===appState.currentGroup);
@@ -1395,11 +1407,24 @@ function renderLeaderboard() {
       pushBills = 0;
       grps.forEach(g => { pushBills += Object.keys(((bs.pushBills[g.id]||{})[s.id]||{})[dayIdx]||{}).length; });
     }
-    return { ...s, total, totalRev, totalTarget, totalBills, pushBills, convRate: totalBills ? pctDec(pushBills,totalBills) : (0).toLocaleString('vi-VN',{minimumFractionDigits:2,maximumFractionDigits:2}) };
-  }).sort((a,b)=>b.totalRev-a.totalRev);
+    const convRateNum = totalBills ? (pushBills/totalBills*100) : 0;
+    const progressPct = totalTarget ? (total/totalTarget*100) : 0;
+    return { ...s, total, totalRev, totalTarget, totalBills, pushBills, progressPct,
+      convRateNum, convRate: convRateNum.toLocaleString('vi-VN',{minimumFractionDigits:2,maximumFractionDigits:2}) };
+  });
 
-  // Podium (top 3), vertical ranked list style
-  const top3 = ranked.slice(0,3);
+  // Sort by whichever column the user clicked (defaults to Doanh Thu, descending)
+  const { field: sortField, dir: sortDir } = appState.leaderboardSort;
+  const sortMul = sortDir === 'asc' ? 1 : -1;
+  ranked.sort((a, b) => {
+    let va = a[sortField], vb = b[sortField];
+    if (typeof va === 'string') return va.localeCompare(vb, 'vi') * sortMul;
+    return ((va||0) - (vb||0)) * sortMul;
+  });
+
+  // Podium always ranks by revenue regardless of the table's current sort, so it stays a
+  // stable "overall top performers" widget
+  const top3 = [...ranked].sort((a,b)=>b.totalRev-a.totalRev).slice(0,3);
   const medalEmoji = ['🥇','🥈','🥉'];
   const medalBg = ['bg-amber-400','bg-slate-300','bg-amber-700'];
   document.getElementById('podiumSection').innerHTML = top3.map((s,i)=>`
@@ -1432,21 +1457,25 @@ function renderLeaderboard() {
     </tr>`;
   }).join('');
 
+  const arrow = (field) => sortField===field ? (sortDir==='desc'?' ▼':' ▲') : '';
+  const th = (field, label, extraCls='') => `<th class="p-3 text-center cursor-pointer select-none hover:bg-slate-200/70 transition ${extraCls}" onclick="setLeaderboardSort('${field}')" title="Sắp xếp theo ${label}">${label}${arrow(field)}</th>`;
+
   document.getElementById('leaderboardTable').innerHTML = `
     <table class="w-full text-left border-collapse">
       <thead>
         <tr class="bg-slate-100 text-slate-700 text-xs font-extrabold uppercase tracking-wider border-b border-slate-200">
           <th class="p-3">Hạng</th>
-          <th class="p-3">Nhân Viên</th>
-          <th class="p-3 text-center">Chức Danh</th>
-          <th class="p-3 text-center bg-orange-50 text-orange-900">Đã Bán</th>
-          <th class="p-3 text-center bg-emerald-50 text-emerald-900">Doanh Thu</th>
-          <th class="p-3 text-center">Tiến Độ (%)</th>
-          <th class="p-3 text-center bg-indigo-50 text-indigo-900">Tỷ Lệ Chốt Đơn</th>
+          ${th('name','Nhân Viên').replace('text-center','')}
+          ${th('role','Chức Danh')}
+          ${th('total','Đã Bán','bg-orange-50 text-orange-900')}
+          ${th('totalRev','Doanh Thu','bg-emerald-50 text-emerald-900')}
+          ${th('progressPct','Tiến Độ (%)')}
+          ${th('convRateNum','Tỷ Lệ Chốt Đơn','bg-indigo-50 text-indigo-900')}
         </tr>
       </thead>
       <tbody class="divide-y divide-slate-200 text-xs font-medium text-slate-800">${tableRows}</tbody>
-    </table>`;
+    </table>
+    <p class="text-[10px] text-slate-400 mt-2 px-1">💡 Bấm vào tiêu đề cột để sắp xếp — bấm lại để đảo chiều tăng/giảm.</p>`;
 }
 
 // ================================================================
